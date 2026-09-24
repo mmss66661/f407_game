@@ -33,6 +33,8 @@
 #include "./menu.h"
 #include "./snake_game.h"
 #include "./tetris.h"
+#include "./breakout.h"
+#include "./game2048.h"
 
 int main(void)
 {
@@ -112,6 +114,26 @@ int main(void)
             else if (cur_game == tetris_get_game())
             {
                 if (!tetris_is_running())
+                {
+                    cur_game->exit();
+                    cur_game = NULL;
+                    menu_init();
+                    menu_attach_input();
+                }
+            }
+            else if (cur_game == breakout_get_game())
+            {
+                if (!breakout_is_running())
+                {
+                    cur_game->exit();
+                    cur_game = NULL;
+                    menu_init();
+                    menu_attach_input();
+                }
+            }
+            else if (cur_game == game2048_get_game())
+            {
+                if (!game2048_is_running())
                 {
                     cur_game->exit();
                     cur_game = NULL;

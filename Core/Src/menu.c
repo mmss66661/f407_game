@@ -20,6 +20,8 @@
 #include "./menu.h"
 #include "./snake_game.h"
 #include "./tetris.h"
+#include "./breakout.h"
+#include "./game2048.h"
 #include "./input.h"
 #include "./BSP/LCD/lcd.h"
 #include "string.h"
@@ -107,6 +109,8 @@ void menu_init(void)
     s_game_count = 0;
     games_table[s_game_count++] = snake_get_game();
     games_table[s_game_count++] = tetris_get_game();
+    games_table[s_game_count++] = breakout_get_game();
+    games_table[s_game_count++] = game2048_get_game();
 
     s_sel = 0;
     s_state = MENU_SHOW;

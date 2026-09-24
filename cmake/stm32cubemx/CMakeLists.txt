@@ -36,6 +36,8 @@ set(MX_Application_Src
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/main.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/snake_game.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/tetris.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/breakout.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/game2048.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/menu.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/save.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/input.c
