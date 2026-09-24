@@ -14,6 +14,7 @@
 #include "./input.h"
 #include "./SYSTEM/delay/delay.h"
 #include "./BSP/KEY/key.h"
+#include "./gamepad.h"
 #include "usbh_core.h"
 #include "usbh_hid.h"
 #include "usbh_hid_keybd.h"
@@ -32,6 +33,9 @@ static uint8_t s_last_dir_key  = 0;   /* 上次方向键用法码 */
 static uint8_t s_last_act_key  = 0;   /* 上次动作键(空格)用法码 */
 static uint8_t s_last_restart_key = 0;/* 上次重开键(回车)用法码 */
 static uint8_t s_last_quit_key = 0;   /* 上次退出键(ESC)用法码 */
+
+/* 手柄按钮边沿检测状态 */
+static uint16_t s_last_gp_btn = 0;    /* 上次手柄按键位图 */
 
 /* ==================== 投递命令(安全封装) ==================== */
 static void input_dispatch(game_cmd_t cmd)
@@ -236,6 +240,45 @@ static void input_process_usb(void)
     s_last_quit_key = quit_key;
 }
 
+/* ==================== 手柄 -> 命令 ==================== */
+static void input_process_gamepad(void)
+{
+    uint16_t btn = g_gamepad.buttons;
+    uint16_t pressed;   /* 本次新按下的键(边沿) */
+
+    /* 手柄未在线则无输入 */
+    if (!gamepad_online())
+    {
+        s_last_gp_btn = 0;
+        return;
+    }
+
+    /* 摇杆方向: 左摇杆幅度超过阈值就触发方向(持续触发, 不边沿) */
+    if (g_gamepad.lx < -GP_STICK_DEADZONE)      input_dispatch(CMD_LEFT);
+    else if (g_gamepad.lx > GP_STICK_DEADZONE)  input_dispatch(CMD_RIGHT);
+    else if (g_gamepad.ly < -GP_STICK_DEADZONE) input_dispatch(CMD_UP);
+    else if (g_gamepad.ly > GP_STICK_DEADZONE)  input_dispatch(CMD_DOWN);
+
+    /* 十字键(HAT): 也映射方向(持续触发) */
+    if (g_gamepad.hat_x < 0)      input_dispatch(CMD_LEFT);
+    else if (g_gamepad.hat_x > 0) input_dispatch(CMD_RIGHT);
+    if (g_gamepad.hat_y < 0)      input_dispatch(CMD_UP);
+    else if (g_gamepad.hat_y > 0) input_dispatch(CMD_DOWN);
+
+    /* 按钮位: 边沿触发 */
+    pressed = btn & ~s_last_gp_btn;
+    s_last_gp_btn = btn;
+
+    if (pressed & (1u << GP_BTN_A))        input_dispatch(CMD_ACTION);    /* A = 动作/旋转 */
+    if (pressed & (1u << GP_BTN_B))        input_dispatch(CMD_RESTART);   /* B = 重开 */
+    if (pressed & (1u << GP_BTN_START))    input_dispatch(CMD_RESTART);   /* START = 重开/启动 */
+    if (pressed & (1u << GP_BTN_BACK))     input_dispatch(CMD_QUIT);      /* BACK = 退出 */
+    if (pressed & (1u << GP_BTN_UP))       input_dispatch(CMD_UP);
+    if (pressed & (1u << GP_BTN_DOWN))     input_dispatch(CMD_DOWN);
+    if (pressed & (1u << GP_BTN_LEFT))     input_dispatch(CMD_LEFT);
+    if (pressed & (1u << GP_BTN_RIGHT))    input_dispatch(CMD_RIGHT);
+}
+
 /* ==================== 输入处理(一帧一次) ==================== */
 void input_process(void)
 {
@@ -249,4 +292,5 @@ void input_process(void)
 
     input_process_usb();
     input_process_keys();
+    input_process_gamepad();
 }

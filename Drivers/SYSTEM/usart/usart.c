@@ -25,6 +25,7 @@
 
 #include "./SYSTEM/sys/sys.h"
 #include "./SYSTEM/usart/usart.h"
+#include "../../Core/Src/gamepad.h"
 
 
 /* 如果使用os,则包括下面的头文件即可 */
@@ -167,6 +168,27 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart)
         HAL_NVIC_SetPriority(USART_UX_IRQn, 3, 3);              /* 抢占优先级3，子优先级3 */
 #endif
     }
+    else if (huart->Instance == USART3)                         /* USART3: HC-05 手柄串口 */
+    {
+        __HAL_RCC_USART3_CLK_ENABLE();                          /* USART3 时钟使能 */
+        __HAL_RCC_GPIOB_CLK_ENABLE();                           /* GPIOB 时钟使能 */
+
+        /* TX = PB10 */
+        gpio_init_struct.Pin = GPIO_PIN_10;
+        gpio_init_struct.Mode = GPIO_MODE_AF_PP;
+        gpio_init_struct.Pull = GPIO_PULLUP;
+        gpio_init_struct.Speed = GPIO_SPEED_FREQ_HIGH;
+        gpio_init_struct.Alternate = GPIO_AF7_USART3;
+        HAL_GPIO_Init(GPIOB, &gpio_init_struct);
+
+        /* RX = PB11 */
+        gpio_init_struct.Pin = GPIO_PIN_11;
+        gpio_init_struct.Alternate = GPIO_AF7_USART3;
+        HAL_GPIO_Init(GPIOB, &gpio_init_struct);
+
+        HAL_NVIC_EnableIRQ(USART3_IRQn);                        /* 使能 USART3 中断 */
+        HAL_NVIC_SetPriority(USART3_IRQn, 3, 2);                /* 抢占3, 子2 */
+    }
 }
 
 /**
@@ -211,6 +233,10 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         
         HAL_UART_Receive_IT(&g_uart1_handle, (uint8_t *)g_rx_buffer, RXBUFFERSIZE);
     }
+    else if (huart->Instance == USART3)         /* USART3: HC-05 手柄 */
+    {
+        gamepad_uart_rx_cplt();                 /* 喂入字节 + 重新启动接收 */
+    }
 }
 
 /**
@@ -229,6 +255,16 @@ void USART_UX_IRQHandler(void)
 #if SYS_SUPPORT_OS                              /* 使用OS */
     OSIntExit();
 #endif
+}
+
+/**
+ * @brief       串口3中断服务函数(HC-05 手柄)
+ * @param       无
+ * @retval      无
+ */
+void USART3_IRQHandler(void)
+{
+    HAL_UART_IRQHandler(&g_gamepad_uart);       /* 调用HAL库中断处理公用函数 */
 }
 
 #endif

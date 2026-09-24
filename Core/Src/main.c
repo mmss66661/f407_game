@@ -35,6 +35,7 @@
 #include "./tetris.h"
 #include "./breakout.h"
 #include "./game2048.h"
+#include "./gamepad.h"
 
 int main(void)
 {
@@ -71,6 +72,8 @@ int main(void)
 
     lcd_show_string(30, 170, 240, 16, 16, "Init USB Host...", BLUE);
     input_usb_init();                       /* 初始化 USB Host(键盘) */
+
+    gamepad_init();                         /* 初始化 USART3(HC-05 手柄) */
 
     delay_ms(1200);
 
