@@ -1,0 +1,91 @@
+# ============================================================
+#  STM32F407 游戏机项目 .gitignore
+#  排除构建产物、编译输出、IDE 配置等无关文件
+# ============================================================
+
+# ---------- 构建输出目录 ----------
+build/
+cmake-build-*/
+_verify/
+_build/
+dist/
+out/
+
+# Keil MDK 输出
+Output/
+Objects/
+Listings/
+
+# IAR EWARM 工程输出
+EWARM/
+Debug/
+Release/
+
+# ---------- 编译中间产物与目标文件 ----------
+*.o
+*.obj
+*.d
+*.dep
+*.a
+*.lib
+
+# ---------- 链接/烧录产物 ----------
+*.elf
+*.hex
+*.bin
+*.axf
+*.map
+*.lst
+*.out
+*.s19
+*.srec
+*.dmp
+
+# ---------- 调试符号 ----------
+*.dSYM/
+*.su
+*.stackdump
+
+# ---------- IDE 配置 ----------
+# CLion / JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# VSCode
+.vscode/
+
+# Keil MDK 工程(本地配置, 含绝对路径)
+*.uvoptx
+*.uvprojx
+*.uvguix.*
+*.uvguix
+*.uvopt
+
+# IAR 工程
+*.eww
+*.ewp
+*.ewd
+
+# Code::Blocks
+*.cbp
+*.depend
+
+# ---------- 操作系统/编辑器临时文件 ----------
+.DS_Store
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ---------- 日志与临时文件 ----------
+*.log
+*.tmp
+*.bak
+*~
+
+# ---------- 其他 ----------
+# 正点原子资料里常见的清理脚本(可选保留, 这里不排除)
+# keilkill.bat
