@@ -18,12 +18,13 @@
 #include "stdio.h"
 
 /* ==================== 棋盘参数 ==================== */
+/* 探索者 F407 4.3 寸屏实际显示高度可能为 480(横屏), 故棋盘需控制在高度 480 内 */
 #define G2048_SIZE      4           /* 4x4 */
-#define G2048_CELL      96          /* 每格像素 */
+#define G2048_CELL      70          /* 每格像素 */
 #define G2048_GAP       12          /* 格子间距 */
 
 #define G2048_OFF_X     ((lcddev.width - (G2048_SIZE * G2048_CELL + (G2048_SIZE - 1) * G2048_GAP)) / 2)
-#define G2048_OFF_Y     120
+#define G2048_OFF_Y     80          /* 4*70+3*12=316, 80+316=396 < 480 */
 
 /* 存档文件名 */
 #define G2048_SAVE_FILE  "game2048.sav"
@@ -102,8 +103,8 @@ static void g2048_draw_tile(uint8_t r, uint8_t c)
     if (v != 0)
     {
         sprintf(buf, "%lu", (unsigned long)v);
-        /* 根据数字位数调整字号和居中 */
-        uint8_t size = (v < 100) ? 32 : (v < 1000 ? 24 : 16);
+        /* 根据数字位数调整字号和居中(格子 70px, 最大字号 24) */
+        uint8_t size = (v < 100) ? 24 : (v < 1000 ? 16 : 12);
         uint16_t tx = x + (G2048_CELL - strlen(buf) * size) / 2;
         uint16_t ty = y + (G2048_CELL - size) / 2;
         lcd_show_string(tx, ty, G2048_CELL, size, size, buf, WHITE);

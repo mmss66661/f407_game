@@ -25,13 +25,15 @@
 #include "stdio.h"
 
 /* ==================== 地图/网格参数 ==================== */
+/* 注意: 探索者 F407 的 4.3 寸屏实际显示区域高度可能为 480(横屏)而非 800,
+ * 故地图尺寸需控制在高度 480 以内, 兼容竖屏/横屏两种布局。 */
 #define CELL_SIZE        12          /* 每个格子的像素边长 */
-#define MAP_COLS         38          /* 地图列数(12*38=456, 宽480留边24) */
-#define MAP_ROWS         52          /* 地图行数(12*52=624) */
+#define MAP_COLS         30          /* 地图列数(12*30=360, 宽480留边) */
+#define MAP_ROWS         28          /* 地图行数(12*28=336) */
 
-/* 游戏区左上角偏移(屏幕 480x800 竖屏) */
-#define MAP_OFF_X        ((lcddev.width  - MAP_COLS * CELL_SIZE) / 2)      /* 12 */
-#define MAP_OFF_Y        100                                               /* 标题+分数区下方 */
+/* 游戏区左上角偏移(自适应屏幕) */
+#define MAP_OFF_X        ((lcddev.width  - MAP_COLS * CELL_SIZE) / 2)
+#define MAP_OFF_Y        90           /* 标题+分数区下方(336+90=426 < 480) */
 
 /* 蛇最大长度 */
 #define SNAKE_MAX_LEN    (MAP_COLS * MAP_ROWS)
