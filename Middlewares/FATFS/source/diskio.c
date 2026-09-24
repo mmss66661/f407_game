@@ -63,6 +63,7 @@ DSTATUS disk_initialize(BYTE pdrv)
 DRESULT disk_read(BYTE pdrv, BYTE *buff, LBA_t sector, UINT count)
 {
     uint8_t res = 1;
+    uint8_t retry = 0;
 
     if (!count) return RES_PARERR;      /* count 不能等于 0 */
 
@@ -70,8 +71,9 @@ DRESULT disk_read(BYTE pdrv, BYTE *buff, LBA_t sector, UINT count)
     {
         res = sd_read_disk(buff, (uint32_t)sector, count);
 
-        while (res)                     /* 读出错则重新初始化后重试 */
+        while (res && retry < 3)        /* 读出错则重新初始化后重试, 最多3次 */
         {
+            retry++;
             sd_init();
             res = sd_read_disk(buff, (uint32_t)sector, count);
         }
@@ -91,6 +93,7 @@ DRESULT disk_read(BYTE pdrv, BYTE *buff, LBA_t sector, UINT count)
 DRESULT disk_write(BYTE pdrv, const BYTE *buff, LBA_t sector, UINT count)
 {
     uint8_t res = 1;
+    uint8_t retry = 0;
 
     if (!count) return RES_PARERR;      /* count 不能等于 0 */
 
@@ -98,8 +101,9 @@ DRESULT disk_write(BYTE pdrv, const BYTE *buff, LBA_t sector, UINT count)
     {
         res = sd_write_disk((uint8_t *)buff, (uint32_t)sector, count);
 
-        while (res)                     /* 写出错则重新初始化后重试 */
+        while (res && retry < 3)        /* 写出错则重新初始化后重试, 最多3次 */
         {
+            retry++;
             sd_init();
             res = sd_write_disk((uint8_t *)buff, (uint32_t)sector, count);
         }

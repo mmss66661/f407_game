@@ -9,6 +9,8 @@
  */
 
 #include "./save.h"
+#include "./BSP/SDIO/sdio_sdcard.h"
+#include "./SYSTEM/delay/delay.h"
 #include "string.h"
 
 /* 存档文件 magic 头(4 字节), 用于识别合法存档 */
@@ -45,21 +47,38 @@ static uint32_t save_checksum(const uint8_t *data, uint32_t len)
 uint8_t save_init(void)
 {
     FRESULT res;
+    uint8_t retry;
 
     s_ready = 0;
+
+    /* 先带重试地初始化 SD 卡(老卡/上电后卡未稳定时, 首次 sd_init 可能失败, 需重试)。
+     * 参考正点原子 SD 卡实验的 while(sd_init()) 健壮性处理。 */
+    for (retry = 0; retry < 10; retry++)
+    {
+        if (sd_init() == 0)
+        {
+            break;
+        }
+        delay_ms(200);   /* 等卡稳定后再重试 */
+    }
+
+    if (retry >= 10)
+    {
+        return 1;   /* SD 卡初始化失败 */
+    }
 
     /* 挂载 SD 卡 */
     res = f_mount(&s_fs, SD_DRIVE, 1);   /* 1: 立即挂载 */
     if (res != FR_OK)
     {
-        return 1;
+        return 2;
     }
 
     /* 尝试打开 /SAVE 目录, 不存在则创建 */
     res = f_mkdir(SAVE_DIR);
     if (res != FR_OK && res != FR_EXIST)
     {
-        return 2;
+        return 3;
     }
 
     s_ready = 1;
