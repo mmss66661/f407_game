@@ -28,30 +28,29 @@ static uint8_t s_dev_type = 0;
 /* 当前命令回调(指向游戏或菜单的处理函数) */
 static input_cmd_handler_t s_cmd_handler = NULL;
 
-/* USB 键盘边沿检测状态 */
-static uint8_t s_last_dir_key  = 0;   /* 上次方向键用法码 */
-static uint8_t s_last_act_key  = 0;   /* 上次动作键(空格)用法码 */
-static uint8_t s_last_restart_key = 0;/* 上次重开键(回车)用法码 */
-static uint8_t s_last_quit_key = 0;   /* 上次退出键(ESC)用法码 */
-
 /* ============ 长按连发状态机(所有按钮统一) ============
  * 逻辑键定义: 用一个小整数索引表示"哪个逻辑按键被按下",
- * 把按钮位图(bit0~14)、十字键(4方向)、摇杆(4方向)统一映射到逻辑键。
+ * 把手柄按钮位图、十字键、摇杆、USB键盘按键统一映射到逻辑键。
  * 每个逻辑键记录: 按下时刻 tick + 上次连发 tick。
  */
-#define GP_KEY_COUNT      24u          /* 逻辑键总数: 15按钮 + 4十字键 + 4摇杆 + 1预留 */
+#define GP_KEY_COUNT      32u          /* 逻辑键总数: 15按钮 + 4十字键 + 4摇杆 + 7键盘 + 预留 */
 
 #define GP_HOLD_THRESHOLD_MS   500u    /* 长按阈值: 按住超过 500ms 进入连发 */
 #define GP_REPEAT_INTERVAL_MS  200u    /* 连发间隔: 进入连发后每 200ms 触发一次 */
 
 /* 逻辑键索引分配 */
-#define GP_KEY_BTN_BASE     0u          /* 按钮位图 bit0~14 -> 索引 0~14 */
-#define GP_KEY_HAT_BASE     15u         /* 十字键: 15=左 16=右 17=上 18=下 */
-#define GP_KEY_STICK_BASE   19u         /* 摇杆:   19=左 20=右 21=上 22=下 */
+#define GP_KEY_BTN_BASE     0u          /* 手柄按钮位图 bit0~14 -> 索引 0~14 */
+#define GP_KEY_HAT_BASE     15u         /* 手柄十字键: 15=左 16=右 17=上 18=下 */
+#define GP_KEY_STICK_BASE   19u         /* 手柄摇杆:   19=左 20=右 21=上 22=下 */
+#define KBD_KEY_BASE        23u         /* USB键盘: 23=左 24=右 25=上 26=下 27=动作 28=重开 29=退出 */
 
 static uint32_t s_gp_key_press_tick[GP_KEY_COUNT]; /* 每个逻辑键按下时刻(0=未按) */
 static uint32_t s_gp_key_repeat_tick[GP_KEY_COUNT];/* 每个逻辑键上次连发时刻 */
 static uint8_t  s_gp_key_held[GP_KEY_COUNT];       /* 每个逻辑键当前是否按住 */
+
+/* 前置声明(实现位于文件后部) */
+static uint8_t gp_key_update(uint8_t key, uint8_t pressed_now);
+static game_cmd_t gp_key_to_cmd(uint8_t key);
 
 /* ==================== 投递命令(安全封装) ==================== */
 static void input_dispatch(game_cmd_t cmd)
@@ -71,10 +70,6 @@ static void input_usb_user_process(USBH_HandleTypeDef *phost, uint8_t id)
     {
         case HOST_USER_DISCONNECTION:
             s_dev_type = 0;
-            s_last_dir_key = 0;
-            s_last_act_key = 0;
-            s_last_restart_key = 0;
-            s_last_quit_key = 0;
             break;
 
         case HOST_USER_CLASS_ACTIVE:
@@ -132,10 +127,6 @@ static void input_usb_reconnect(void)
     USBH_Start(&s_usb_host);
 
     s_dev_type = 0;
-    s_last_dir_key = 0;
-    s_last_act_key = 0;
-    s_last_restart_key = 0;
-    s_last_quit_key = 0;
 }
 
 /* ==================== USB 键盘初始化 ==================== */
@@ -171,27 +162,30 @@ static void input_process_keys(void)
 static void input_process_usb(void)
 {
     HID_KEYBD_Info_TypeDef *info;
-    uint8_t dir_key = 0;       /* 方向键用法码 */
-    uint8_t act_key = 0;       /* 动作键(空格) */
-    uint8_t restart_key = 0;   /* 重开键(回车) */
-    uint8_t quit_key = 0;      /* 退出键(ESC) */
+    uint8_t left = 0, right = 0, up = 0, down = 0;
+    uint8_t act = 0, restart = 0, quit = 0;
     uint8_t i;
 
     if (s_usb_host.gState != HOST_CLASS || s_dev_type != 1)
     {
-        s_last_dir_key = 0;
-        s_last_act_key = 0;
-        s_last_restart_key = 0;
-        s_last_quit_key = 0;
+        /* 键盘断开: 清空所有键盘逻辑键状态 */
+        for (i = 0; i < 7; i++)
+        {
+            s_gp_key_held[KBD_KEY_BASE + i] = 0;
+            s_gp_key_press_tick[KBD_KEY_BASE + i] = 0;
+            s_gp_key_repeat_tick[KBD_KEY_BASE + i] = 0;
+        }
         return;
     }
 
     if (USBH_HID_GetDeviceType(&s_usb_host) != HID_KEYBOARD)
     {
-        s_last_dir_key = 0;
-        s_last_act_key = 0;
-        s_last_restart_key = 0;
-        s_last_quit_key = 0;
+        for (i = 0; i < 7; i++)
+        {
+            s_gp_key_held[KBD_KEY_BASE + i] = 0;
+            s_gp_key_press_tick[KBD_KEY_BASE + i] = 0;
+            s_gp_key_repeat_tick[KBD_KEY_BASE + i] = 0;
+        }
         return;
     }
 
@@ -201,7 +195,7 @@ static void input_process_usb(void)
         return;
     }
 
-    /* 扫描当前按下的键 */
+    /* 扫描当前按下的键, 归类到 7 个逻辑键 */
     for (i = 0; i < 6; i++)
     {
         uint8_t k = info->keys[i];
@@ -209,51 +203,25 @@ static void input_process_usb(void)
 
         switch (k)
         {
-            case KEY_LEFTARROW:  case KEY_A: dir_key = KEY_LEFTARROW;   break;
-            case KEY_RIGHTARROW: case KEY_D: dir_key = KEY_RIGHTARROW;  break;
-            case KEY_UPARROW:    case KEY_W: dir_key = KEY_UPARROW;     break;
-            case KEY_DOWNARROW:  case KEY_S: dir_key = KEY_DOWNARROW;   break;
-            case KEY_SPACEBAR:   act_key = KEY_SPACEBAR;                break;
-            case KEY_ENTER:      restart_key = KEY_ENTER;               break;
-            case KEY_ESCAPE:     quit_key = KEY_ESCAPE;                 break;
+            case KEY_LEFTARROW:  case KEY_A: left = 1;     break;
+            case KEY_RIGHTARROW: case KEY_D: right = 1;    break;
+            case KEY_UPARROW:    case KEY_W: up = 1;       break;
+            case KEY_DOWNARROW:  case KEY_S: down = 1;     break;
+            case KEY_SPACEBAR:   act = 1;                  break;
+            case KEY_ENTER:      restart = 1;              break;
+            case KEY_ESCAPE:     quit = 1;                 break;
             default: break;
         }
     }
 
-    /* 方向键: 边沿触发 */
-    if (dir_key != 0 && dir_key != s_last_dir_key)
-    {
-        switch (dir_key)
-        {
-            case KEY_LEFTARROW:  input_dispatch(CMD_LEFT);   break;
-            case KEY_RIGHTARROW: input_dispatch(CMD_RIGHT);  break;
-            case KEY_UPARROW:    input_dispatch(CMD_UP);     break;
-            case KEY_DOWNARROW:  input_dispatch(CMD_DOWN);   break;
-            default: break;
-        }
-    }
-    s_last_dir_key = dir_key;
-
-    /* 动作键(空格): 边沿触发 */
-    if (act_key != 0 && act_key != s_last_act_key)
-    {
-        input_dispatch(CMD_ACTION);
-    }
-    s_last_act_key = act_key;
-
-    /* 重开键(回车): 边沿触发 */
-    if (restart_key != 0 && restart_key != s_last_restart_key)
-    {
-        input_dispatch(CMD_RESTART);
-    }
-    s_last_restart_key = restart_key;
-
-    /* 退出键(ESC): 边沿触发 */
-    if (quit_key != 0 && quit_key != s_last_quit_key)
-    {
-        input_dispatch(CMD_QUIT);
-    }
-    s_last_quit_key = quit_key;
+    /* 用统一长按连发状态机处理 7 个键盘逻辑键 */
+    if (gp_key_update(KBD_KEY_BASE + 0, left))    input_dispatch(CMD_LEFT);
+    if (gp_key_update(KBD_KEY_BASE + 1, right))   input_dispatch(CMD_RIGHT);
+    if (gp_key_update(KBD_KEY_BASE + 2, up))      input_dispatch(CMD_UP);
+    if (gp_key_update(KBD_KEY_BASE + 3, down))    input_dispatch(CMD_DOWN);
+    if (gp_key_update(KBD_KEY_BASE + 4, act))     input_dispatch(CMD_ACTION);
+    if (gp_key_update(KBD_KEY_BASE + 5, restart)) input_dispatch(CMD_RESTART);
+    if (gp_key_update(KBD_KEY_BASE + 6, quit))    input_dispatch(CMD_QUIT);
 }
 
 /* ==================== 手柄 -> 命令 ==================== */
@@ -287,7 +255,7 @@ static game_cmd_t gp_key_to_cmd(uint8_t key)
             default: return CMD_NONE;
         }
     }
-    else                                /* 摇杆 */
+    else if (key < KBD_KEY_BASE)       /* 摇杆 */
     {
         switch (key - GP_KEY_STICK_BASE)
         {
@@ -295,6 +263,20 @@ static game_cmd_t gp_key_to_cmd(uint8_t key)
             case 1: return CMD_RIGHT;
             case 2: return CMD_UP;
             case 3: return CMD_DOWN;
+            default: return CMD_NONE;
+        }
+    }
+    else                                /* USB 键盘 */
+    {
+        switch (key - KBD_KEY_BASE)
+        {
+            case 0: return CMD_LEFT;    /* 左 */
+            case 1: return CMD_RIGHT;   /* 右 */
+            case 2: return CMD_UP;      /* 上 */
+            case 3: return CMD_DOWN;    /* 下 */
+            case 4: return CMD_ACTION;  /* 动作(空格) */
+            case 5: return CMD_RESTART; /* 重开(回车) */
+            case 6: return CMD_QUIT;    /* 退出(ESC) */
             default: return CMD_NONE;
         }
     }

@@ -85,9 +85,16 @@ static uint32_t snake_rand(void);
 /* ==================== 伪随机数 ==================== */
 static uint32_t snake_rand_seed;
 
+/* 播种: 用运行时间戳保证每次(含首次)种子非零且不同, 避免食物位置固定 */
+static void snake_seed(void)
+{
+    snake_rand_seed = HAL_GetTick() ^ (uint32_t)(SysTick->VAL) ^ 0x9E3779B9UL;
+    if (snake_rand_seed == 0) snake_rand_seed = 1;
+}
+
 static uint32_t snake_rand(void)
 {
-    snake_rand_seed = snake_rand_seed * 1103515245UL + 12345UL + (uint32_t)(SysTick->VAL);
+    snake_rand_seed = snake_rand_seed * 1103515245UL + 12345UL;
     return (snake_rand_seed >> 16) & 0x7FFF;
 }
 
@@ -131,6 +138,7 @@ static void snake_reset(void)
     g_snake.tick = HAL_GetTick();
     g_snake.state = SNAKE_RUNNING;
 
+    snake_seed();           /* 每次重置重新播种, 保证食物位置随机 */
     snake_spawn_food();
 
     lcd_clear(WHITE);
@@ -164,6 +172,37 @@ static void snake_spawn_food(void)
         if (++guard > 1000) break;
     }
     while (overlap);
+
+    /* 兜底: 若上面仍与蛇身重叠(随机数极端情况), 顺序扫描找第一个空格子,
+     * 保证食物必定可见, 不会被蛇身遮挡。 */
+    if (overlap)
+    {
+        for (gy = 0; gy < MAP_ROWS; gy++)
+        {
+            for (gx = 0; gx < MAP_COLS; gx++)
+            {
+                uint8_t occupied = 0;
+                for (i = 0; i < g_snake.len; i++)
+                {
+                    if (g_snake.sx[i] == gx && g_snake.sy[i] == gy)
+                    {
+                        occupied = 1;
+                        break;
+                    }
+                }
+                if (!occupied)
+                {
+                    g_snake.food_x = gx;
+                    g_snake.food_y = gy;
+                    return;
+                }
+            }
+        }
+        /* 理论上蛇未占满整张地图, 一定能找到空格; 极端满屏则放 (0,0) */
+        g_snake.food_x = 0;
+        g_snake.food_y = 0;
+        return;
+    }
 
     g_snake.food_x = gx;
     g_snake.food_y = gy;

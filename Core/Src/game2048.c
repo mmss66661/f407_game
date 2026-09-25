@@ -256,7 +256,7 @@ static uint8_t g2048_move(uint8_t dir)   /* 0=up,1=down,2=left,3=right */
             uint32_t line[G2048_SIZE];
             for (r = 0; r < G2048_SIZE; r++) line[G2048_SIZE - 1 - r] = g_2048.board[r][c];
             g2048_merge_line(line);
-            for (r = 0; r < G2048_SIZE; r++) g_2048.board[r][G2048_SIZE - 1 - r] = line[r];
+            for (r = 0; r < G2048_SIZE; r++) g_2048.board[r][c] = line[G2048_SIZE - 1 - r];
         }
     }
 
