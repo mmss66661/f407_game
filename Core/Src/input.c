@@ -34,8 +34,24 @@ static uint8_t s_last_act_key  = 0;   /* 上次动作键(空格)用法码 */
 static uint8_t s_last_restart_key = 0;/* 上次重开键(回车)用法码 */
 static uint8_t s_last_quit_key = 0;   /* 上次退出键(ESC)用法码 */
 
-/* 手柄按钮边沿检测状态 */
-static uint16_t s_last_gp_btn = 0;    /* 上次手柄按键位图 */
+/* ============ 长按连发状态机(所有按钮统一) ============
+ * 逻辑键定义: 用一个小整数索引表示"哪个逻辑按键被按下",
+ * 把按钮位图(bit0~14)、十字键(4方向)、摇杆(4方向)统一映射到逻辑键。
+ * 每个逻辑键记录: 按下时刻 tick + 上次连发 tick。
+ */
+#define GP_KEY_COUNT      24u          /* 逻辑键总数: 15按钮 + 4十字键 + 4摇杆 + 1预留 */
+
+#define GP_HOLD_THRESHOLD_MS   500u    /* 长按阈值: 按住超过 500ms 进入连发 */
+#define GP_REPEAT_INTERVAL_MS  200u    /* 连发间隔: 进入连发后每 200ms 触发一次 */
+
+/* 逻辑键索引分配 */
+#define GP_KEY_BTN_BASE     0u          /* 按钮位图 bit0~14 -> 索引 0~14 */
+#define GP_KEY_HAT_BASE     15u         /* 十字键: 15=左 16=右 17=上 18=下 */
+#define GP_KEY_STICK_BASE   19u         /* 摇杆:   19=左 20=右 21=上 22=下 */
+
+static uint32_t s_gp_key_press_tick[GP_KEY_COUNT]; /* 每个逻辑键按下时刻(0=未按) */
+static uint32_t s_gp_key_repeat_tick[GP_KEY_COUNT];/* 每个逻辑键上次连发时刻 */
+static uint8_t  s_gp_key_held[GP_KEY_COUNT];       /* 每个逻辑键当前是否按住 */
 
 /* ==================== 投递命令(安全封装) ==================== */
 static void input_dispatch(game_cmd_t cmd)
@@ -241,42 +257,149 @@ static void input_process_usb(void)
 }
 
 /* ==================== 手柄 -> 命令 ==================== */
+
+/* 逻辑键 -> 命令 的映射 */
+static game_cmd_t gp_key_to_cmd(uint8_t key)
+{
+    if (key < GP_KEY_HAT_BASE)      /* 按钮位图 */
+    {
+        switch (key)
+        {
+            case GP_BTN_A:      return CMD_ACTION;
+            case GP_BTN_B:      return CMD_RESTART;
+            case GP_BTN_START:  return CMD_RESTART;
+            case GP_BTN_BACK:   return CMD_QUIT;
+            case GP_BTN_UP:     return CMD_UP;
+            case GP_BTN_DOWN:   return CMD_DOWN;
+            case GP_BTN_LEFT:   return CMD_LEFT;
+            case GP_BTN_RIGHT:  return CMD_RIGHT;
+            default:            return CMD_NONE;
+        }
+    }
+    else if (key < GP_KEY_STICK_BASE)  /* 十字键 */
+    {
+        switch (key - GP_KEY_HAT_BASE)
+        {
+            case 0: return CMD_LEFT;   /* 左 */
+            case 1: return CMD_RIGHT;  /* 右 */
+            case 2: return CMD_UP;     /* 上 */
+            case 3: return CMD_DOWN;   /* 下 */
+            default: return CMD_NONE;
+        }
+    }
+    else                                /* 摇杆 */
+    {
+        switch (key - GP_KEY_STICK_BASE)
+        {
+            case 0: return CMD_LEFT;
+            case 1: return CMD_RIGHT;
+            case 2: return CMD_UP;
+            case 3: return CMD_DOWN;
+            default: return CMD_NONE;
+        }
+    }
+}
+
+/* 处理一个逻辑键的按下状态: 输入当前是否按住(pressed_now)
+ * 返回是否应该投递命令(边沿 or 长按连发) */
+static uint8_t gp_key_update(uint8_t key, uint8_t pressed_now)
+{
+    uint32_t now = HAL_GetTick();
+    uint8_t was_held = s_gp_key_held[key];
+
+    /* --- 松开处理: 清零状态 --- */
+    if (!pressed_now)
+    {
+        if (was_held)
+        {
+            s_gp_key_held[key]     = 0;
+            s_gp_key_press_tick[key] = 0;
+            s_gp_key_repeat_tick[key] = 0;
+        }
+        return 0;
+    }
+
+    /* --- 按下处理 --- */
+    if (!was_held)
+    {
+        /* 刚按下: 记录时刻, 立即触发一次(边沿) */
+        s_gp_key_held[key]      = 1;
+        s_gp_key_press_tick[key] = now;
+        s_gp_key_repeat_tick[key] = now;
+        return 1;
+    }
+
+    /* 一直按住: 判断是否进入长按连发 */
+    uint32_t held_ms = now - s_gp_key_press_tick[key];
+    if (held_ms >= GP_HOLD_THRESHOLD_MS)
+    {
+        /* 超过长按阈值, 且距上次连发 >= 间隔, 触发一次连发 */
+        if (now - s_gp_key_repeat_tick[key] >= GP_REPEAT_INTERVAL_MS)
+        {
+            s_gp_key_repeat_tick[key] = now;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void input_process_gamepad(void)
 {
     uint16_t btn = g_gamepad.buttons;
-    uint16_t pressed;   /* 本次新按下的键(边沿) */
+    int8_t hat_x = g_gamepad.hat_x;
+    int8_t hat_y = g_gamepad.hat_y;
+    int8_t stick_x, stick_y;
+    uint8_t bit;
 
-    /* 手柄未在线则无输入 */
+    /* 手柄未在线则无输入, 清空所有按键状态 */
     if (!gamepad_online())
     {
-        s_last_gp_btn = 0;
+        memset(s_gp_key_held, 0, sizeof(s_gp_key_held));
+        memset(s_gp_key_press_tick, 0, sizeof(s_gp_key_press_tick));
+        memset(s_gp_key_repeat_tick, 0, sizeof(s_gp_key_repeat_tick));
         return;
     }
 
-    /* 摇杆方向: 左摇杆幅度超过阈值就触发方向(持续触发, 不边沿) */
-    if (g_gamepad.lx < -GP_STICK_DEADZONE)      input_dispatch(CMD_LEFT);
-    else if (g_gamepad.lx > GP_STICK_DEADZONE)  input_dispatch(CMD_RIGHT);
-    else if (g_gamepad.ly < -GP_STICK_DEADZONE) input_dispatch(CMD_UP);
-    else if (g_gamepad.ly > GP_STICK_DEADZONE)  input_dispatch(CMD_DOWN);
+    /* 摇杆方向量化(死区外 -> ±1) */
+    stick_x = (g_gamepad.lx < -GP_STICK_DEADZONE) ? -1 :
+              (g_gamepad.lx >  GP_STICK_DEADZONE) ?  1 : 0;
+    stick_y = (g_gamepad.ly < -GP_STICK_DEADZONE) ? -1 :
+              (g_gamepad.ly >  GP_STICK_DEADZONE) ?  1 : 0;
 
-    /* 十字键(HAT): 也映射方向(持续触发) */
-    if (g_gamepad.hat_x < 0)      input_dispatch(CMD_LEFT);
-    else if (g_gamepad.hat_x > 0) input_dispatch(CMD_RIGHT);
-    if (g_gamepad.hat_y < 0)      input_dispatch(CMD_UP);
-    else if (g_gamepad.hat_y > 0) input_dispatch(CMD_DOWN);
+    /* ---- 按钮位图: 逐位处理(支持长按连发) ---- */
+    for (bit = 0; bit < 15; bit++)
+    {
+        uint8_t pressed_now = (btn >> bit) & 1u;
+        if (gp_key_update(bit, pressed_now))
+        {
+            game_cmd_t c = gp_key_to_cmd(bit);
+            if (c != CMD_NONE) input_dispatch(c);
+        }
+    }
 
-    /* 按钮位: 边沿触发 */
-    pressed = btn & ~s_last_gp_btn;
-    s_last_gp_btn = btn;
+    /* ---- 十字键: 4 方向(支持长按连发) ---- */
+    {
+        uint8_t l = (hat_x < 0);
+        uint8_t r = (hat_x > 0);
+        uint8_t u = (hat_y < 0);
+        uint8_t d = (hat_y > 0);
+        if (gp_key_update(GP_KEY_HAT_BASE + 0, l)) input_dispatch(CMD_LEFT);
+        if (gp_key_update(GP_KEY_HAT_BASE + 1, r)) input_dispatch(CMD_RIGHT);
+        if (gp_key_update(GP_KEY_HAT_BASE + 2, u)) input_dispatch(CMD_UP);
+        if (gp_key_update(GP_KEY_HAT_BASE + 3, d)) input_dispatch(CMD_DOWN);
+    }
 
-    if (pressed & (1u << GP_BTN_A))        input_dispatch(CMD_ACTION);    /* A = 动作/旋转 */
-    if (pressed & (1u << GP_BTN_B))        input_dispatch(CMD_RESTART);   /* B = 重开 */
-    if (pressed & (1u << GP_BTN_START))    input_dispatch(CMD_RESTART);   /* START = 重开/启动 */
-    if (pressed & (1u << GP_BTN_BACK))     input_dispatch(CMD_QUIT);      /* BACK = 退出 */
-    if (pressed & (1u << GP_BTN_UP))       input_dispatch(CMD_UP);
-    if (pressed & (1u << GP_BTN_DOWN))     input_dispatch(CMD_DOWN);
-    if (pressed & (1u << GP_BTN_LEFT))     input_dispatch(CMD_LEFT);
-    if (pressed & (1u << GP_BTN_RIGHT))    input_dispatch(CMD_RIGHT);
+    /* ---- 摇杆: 4 方向(支持长按连发) ---- */
+    {
+        uint8_t l = (stick_x < 0);
+        uint8_t r = (stick_x > 0);
+        uint8_t u = (stick_y < 0);
+        uint8_t d = (stick_y > 0);
+        if (gp_key_update(GP_KEY_STICK_BASE + 0, l)) input_dispatch(CMD_LEFT);
+        if (gp_key_update(GP_KEY_STICK_BASE + 1, r)) input_dispatch(CMD_RIGHT);
+        if (gp_key_update(GP_KEY_STICK_BASE + 2, u)) input_dispatch(CMD_UP);
+        if (gp_key_update(GP_KEY_STICK_BASE + 3, d)) input_dispatch(CMD_DOWN);
+    }
 }
 
 /* ==================== 输入处理(一帧一次) ==================== */
